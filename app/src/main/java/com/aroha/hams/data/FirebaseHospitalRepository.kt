@@ -4,8 +4,10 @@ import com.aroha.hams.dataclass.Appointment
 import com.aroha.hams.dataclass.Role
 import com.aroha.hams.dataclass.User
 import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.auth.FirebaseUser
 import com.google.firebase.firestore.DocumentSnapshot
 import com.google.firebase.firestore.FieldValue
+import com.google.firebase.firestore.FirebaseFirestoreException
 import com.google.firebase.firestore.FirebaseFirestore
 import kotlinx.coroutines.tasks.await
 
@@ -15,16 +17,16 @@ class FirebaseHospitalRepository(
 ) {
     suspend fun currentUser(): User? {
         val firebaseUser = auth.currentUser ?: return null
-        return readUser(firebaseUser.uid)
+        return readUserOrPatient(firebaseUser)
     }
 
     suspend fun signIn(email: String, password: String): User {
         val credential = auth
             .signInWithEmailAndPassword(email.trim(), password)
             .await()
-        val uid = credential.user?.uid
+        val firebaseUser = credential.user
             ?: error("Firebase did not return a user after sign-in.")
-        return readUser(uid)
+        return readUserOrPatient(firebaseUser)
     }
 
     suspend fun register(
@@ -118,12 +120,33 @@ class FirebaseHospitalRepository(
         auth.signOut()
     }
 
-    private suspend fun readUser(uid: String): User {
-        val snapshot = firestore().collection(USERS).document(uid).get().await()
-        check(snapshot.exists()) {
-            "Your account profile is missing. Contact the administrator or register again."
+    private suspend fun readUserOrPatient(firebaseUser: FirebaseUser): User {
+        try {
+            val snapshot = firestore().collection(USERS).document(firebaseUser.uid).get().await()
+            if (snapshot.exists()) return snapshot.toUser()
+        } catch (exception: FirebaseFirestoreException) {
+            if (exception.code !in setOf(
+                    FirebaseFirestoreException.Code.NOT_FOUND,
+                    FirebaseFirestoreException.Code.UNAVAILABLE
+                )
+            ) {
+                throw exception
+            }
         }
-        return snapshot.toUser()
+        return firebaseUser.toPatient()
+    }
+
+    private fun FirebaseUser.toPatient(): User {
+        val name = displayName.orEmpty().trim()
+            .ifBlank { email.orEmpty().substringBefore("@").ifBlank { "Patient" } }
+        val nameParts = name.split(Regex("\\s+"), limit = 2)
+        return User(
+            id = uid,
+            firstName = nameParts.first(),
+            lastName = nameParts.getOrElse(1) { "" },
+            email = email.orEmpty(),
+            role = Role.PATIENT
+        )
     }
 
     private fun firestore(): FirebaseFirestore = database
