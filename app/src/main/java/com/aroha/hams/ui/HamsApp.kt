@@ -45,6 +45,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.aroha.hams.data.FirebaseHospitalRepository
 import com.aroha.hams.dataclass.Appointment
@@ -73,6 +74,7 @@ fun HamsApp() {
     var loadingSlots by remember { mutableStateOf(false) }
     var showAvailabilityDialog by remember { mutableStateOf(false) }
     var showAppointments by remember { mutableStateOf(false) }
+    var appointmentsCalendarView by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var loadingDashboard by remember { mutableStateOf(false) }
     var refreshKey by remember { mutableIntStateOf(0) }
@@ -167,10 +169,12 @@ fun HamsApp() {
                     appointments = appointments,
                     doctorSchedule = doctorSchedule,
                     showAppointments = showAppointments,
+                    appointmentsCalendarView = appointmentsCalendarView,
                     loading = loadingDashboard,
                     busy = busy,
                     error = error,
                     onShowAppointments = { showAppointments = true },
+                    onToggleAppointmentsView = { appointmentsCalendarView = it },
                     onShowSchedule = { showAppointments = false },
                     onBookDoctor = { selectedDoctor = it },
                     onAddAvailability = { showAvailabilityDialog = true },
@@ -197,6 +201,7 @@ fun HamsApp() {
                                 doctors = emptyList()
                                 appointments = emptyList()
                                 showAppointments = false
+                                appointmentsCalendarView = false
                                 error = null
                             } catch (exception: Exception) {
                                 error = exception.message ?: "Unable to sign out."
@@ -438,10 +443,12 @@ private fun Dashboard(
     appointments: List<Appointment>,
     doctorSchedule: List<AvailabilitySlot>,
     showAppointments: Boolean,
+    appointmentsCalendarView: Boolean,
     loading: Boolean,
     busy: Boolean,
     error: String?,
     onShowAppointments: () -> Unit,
+    onToggleAppointmentsView: (Boolean) -> Unit,
     onShowSchedule: () -> Unit,
     onBookDoctor: (User) -> Unit,
     onAddAvailability: () -> Unit,
@@ -487,13 +494,29 @@ private fun Dashboard(
                 )
             }
         }
+        if (showAppointments) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = !appointmentsCalendarView,
+                    onClick = { onToggleAppointmentsView(false) },
+                    label = { Text("List") }
+                )
+                FilterChip(
+                    selected = appointmentsCalendarView,
+                    onClick = { onToggleAppointmentsView(true) },
+                    label = { Text("Calendar") }
+                )
+            }
+        }
         error?.let { ErrorText(it) }
         if (loading) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
         } else if (showAppointments) {
-            if (appointments.isEmpty()) {
+            if (appointmentsCalendarView) {
+                AppointmentCalendar(appointments, user.role)
+            } else if (appointments.isEmpty()) {
                 EmptyMessage(
                     "No appointments yet."
                 )
@@ -607,6 +630,163 @@ private fun AppointmentCard(appointment: Appointment, viewerRole: Role) {
         }
     }
 }
+
+@Composable
+private fun AppointmentCalendar(appointments: List<Appointment>, viewerRole: Role) {
+    val today = remember { Calendar.getInstance() }
+    var displayedYear by remember { mutableIntStateOf(today.get(Calendar.YEAR)) }
+    var displayedMonth by remember { mutableIntStateOf(today.get(Calendar.MONTH)) }
+    var selectedDate by remember { mutableStateOf(todayIsoDate()) }
+    val appointmentsByDate = appointments.groupBy(Appointment::date)
+    val selectedAppointments = appointmentsByDate[selectedDate].orEmpty()
+
+    Column(Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            TextButton(onClick = {
+                val moved = shiftedMonth(displayedYear, displayedMonth, -1)
+                displayedYear = moved.first
+                displayedMonth = moved.second
+                selectedDate = monthDate(moved.first, moved.second, 1)
+            }) {
+                Text("‹ Previous")
+            }
+            Text(
+                monthLabel(displayedYear, displayedMonth),
+                style = MaterialTheme.typography.titleMedium
+            )
+            TextButton(onClick = {
+                val moved = shiftedMonth(displayedYear, displayedMonth, 1)
+                displayedYear = moved.first
+                displayedMonth = moved.second
+                selectedDate = monthDate(moved.first, moved.second, 1)
+            }) {
+                Text("Next ›")
+            }
+        }
+        Row(Modifier.fillMaxWidth()) {
+            listOf("M", "T", "W", "T", "F", "S", "S").forEach { day ->
+                Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                    Text(day, style = MaterialTheme.typography.labelSmall)
+                }
+            }
+        }
+        val cells = monthCalendarCells(displayedYear, displayedMonth)
+        cells.chunked(7).forEach { week ->
+            Row(Modifier.fillMaxWidth()) {
+                week.forEach { day ->
+                    val date = day?.let { monthDate(displayedYear, displayedMonth, it) }
+                    val dayAppointments = date?.let { appointmentsByDate[it].orEmpty() }.orEmpty()
+                    val selected = date == selectedDate
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(2.dp)
+                            .aspectRatio(1f)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(
+                                when {
+                                    selected -> MaterialTheme.colorScheme.primary
+                                    dayAppointments.isNotEmpty() ->
+                                        MaterialTheme.colorScheme.secondaryContainer
+                                    else -> MaterialTheme.colorScheme.surfaceVariant
+                                }
+                            )
+                            .then(
+                                if (date != null) {
+                                    Modifier.clickable { selectedDate = date }
+                                } else {
+                                    Modifier
+                                }
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (day != null) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    day.toString(),
+                                    color = if (selected) MaterialTheme.colorScheme.onPrimary
+                                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                if (dayAppointments.isNotEmpty()) {
+                                    Text(
+                                        dayAppointments.size.toString(),
+                                        color = if (selected) MaterialTheme.colorScheme.onPrimary
+                                        else MaterialTheme.colorScheme.onSecondaryContainer,
+                                        style = MaterialTheme.typography.labelSmall
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            formatDateLabel(selectedDate),
+            style = MaterialTheme.typography.titleSmall
+        )
+        if (selectedAppointments.isEmpty()) {
+            EmptyMessage("No appointments on this day.")
+        } else {
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 8.dp)
+            ) {
+                items(selectedAppointments, key = Appointment::id) { appointment ->
+                    AppointmentCard(appointment, viewerRole)
+                }
+            }
+        }
+    }
+}
+
+private fun monthCalendarCells(year: Int, month: Int): List<Int?> {
+    val calendar = Calendar.getInstance().apply {
+        set(Calendar.YEAR, year)
+        set(Calendar.MONTH, month)
+        set(Calendar.DAY_OF_MONTH, 1)
+    }
+    val offset = (calendar.get(Calendar.DAY_OF_WEEK) + 5) % 7
+    val cells = mutableListOf<Int?>()
+    repeat(offset) { cells.add(null) }
+    repeat(calendar.getActualMaximum(Calendar.DAY_OF_MONTH)) { cells.add(it + 1) }
+    while (cells.size % 7 != 0) cells.add(null)
+    return cells
+}
+
+private fun shiftedMonth(year: Int, month: Int, amount: Int): Pair<Int, Int> {
+    val calendar = Calendar.getInstance().apply {
+        set(Calendar.YEAR, year)
+        set(Calendar.MONTH, month)
+        add(Calendar.MONTH, amount)
+    }
+    return calendar.get(Calendar.YEAR) to calendar.get(Calendar.MONTH)
+}
+
+private fun monthDate(year: Int, month: Int, day: Int): String =
+    SimpleDateFormat("yyyy-MM-dd", Locale.US).format(
+        Calendar.getInstance().apply {
+            set(Calendar.YEAR, year)
+            set(Calendar.MONTH, month)
+            set(Calendar.DAY_OF_MONTH, day)
+        }.time
+    )
+
+private fun monthLabel(year: Int, month: Int): String =
+    SimpleDateFormat("MMMM yyyy", Locale.getDefault()).format(
+        Calendar.getInstance().apply {
+            set(Calendar.YEAR, year)
+            set(Calendar.MONTH, month)
+            set(Calendar.DAY_OF_MONTH, 1)
+        }.time
+    )
 
 @Composable
 private fun BookingDialog(
@@ -799,7 +979,21 @@ private fun TimeDropdown(
             onClick = { expanded = true },
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("$label: ${selectedLabel ?: "Choose"}")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text(label, style = MaterialTheme.typography.labelSmall)
+                    Text(
+                        selectedLabel ?: "Tap to choose",
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+                Text("▼", style = MaterialTheme.typography.labelLarge)
+            }
         }
         DropdownMenu(
             expanded = expanded,
