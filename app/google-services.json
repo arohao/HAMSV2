@@ -1,0 +1,40 @@
+{
+  "project_info": {
+    "project_number": "29960240158",
+    "firebase_url": "https://hams-reboot-default-rtdb.firebaseio.com",
+    "project_id": "hams-reboot",
+    "storage_bucket": "hams-reboot.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:29960240158:android:501da5f59212121229820f",
+        "android_client_info": {
+          "package_name": "com.aroha.hams"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "29960240158-q30rvj4bg6k5j88g3inev8f70im9s9n9.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCLcU31w_WK2yDUp9gulOHJHJ4oJHJaRsE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "29960240158-q30rvj4bg6k5j88g3inev8f70im9s9n9.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
