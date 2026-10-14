@@ -18,16 +18,10 @@ flowchart LR
 - Doctor accounts publish available appointment times.
 - Patients choose an open time to book with a doctor.
 - Both patients and doctors can view appointments as a list or calendar.
-- Firebase Cloud Firestore stores profiles, schedules, and appointments.
 
-## Firebase setup
-
-The app is configured for the Firebase project `hams-reboot` with the Android package `com.aroha.hams`.
-
-1. In Firebase Console, enable **Email/Password** under Authentication.
-2. Create the default Cloud Firestore database.
-3. Publish the rules in [`firestore.rules`](firestore.rules) from **Firestore Database → Rules**.
-4. Make sure email verification is enabled for the Firebase project.
+## Firebase
+The app is configured as Firebase project.
+Firebase Cloud Firestore stores profiles, schedules, and appointments.
 
 ## Build
 
