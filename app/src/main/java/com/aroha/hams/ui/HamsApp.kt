@@ -5,14 +5,19 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -36,6 +41,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.aroha.hams.data.FirebaseHospitalRepository
@@ -672,30 +678,40 @@ private fun AvailabilityDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Add open times") },
+        title = { Text("Choose an open appointment time") },
         text = {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
-                Text("Date")
-                dates.chunked(3).forEach { dateRow ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        dateRow.forEach { (date, label) ->
-                            FilterChip(
-                                selected = selectedDate == date,
-                                onClick = { selectedDate = date },
-                                label = { Text(label) }
-                            )
-                        }
-                    }
-                }
-                Text("Start time")
+            Column(
+                Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 440.dp)
+                    .verticalScroll(rememberScrollState())
+            ) {
+                Text(
+                    formatDateLabel(selectedDate),
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Spacer(Modifier.height(8.dp))
+                CalendarGrid(
+                    dates = dates.map { it.first },
+                    selectedDate = selectedDate,
+                    onSelectDate = { selectedDate = it }
+                )
+                Spacer(Modifier.height(16.dp))
+                Text("Available start times", style = MaterialTheme.typography.titleSmall)
+                Spacer(Modifier.height(4.dp))
                 appointmentTimes.chunked(3).forEach { timeRow ->
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
                         timeRow.forEach { time ->
-                            FilterChip(
-                                selected = selectedTime == time,
-                                onClick = { selectedTime = time },
-                                label = { Text(time) }
-                            )
+                            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                                FilterChip(
+                                    selected = selectedTime == time,
+                                    onClick = { selectedTime = time },
+                                    label = { Text(time) }
+                                )
+                            }
                         }
                     }
                 }
@@ -707,7 +723,7 @@ private fun AvailabilityDialog(
                 if (busy) {
                     CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                 } else {
-                    Text("Add availability")
+                    Text("Add this time")
                 }
             }
         },
@@ -715,6 +731,73 @@ private fun AvailabilityDialog(
             TextButton(onClick = onDismiss, enabled = !busy) { Text("Cancel") }
         }
     )
+}
+
+@Composable
+private fun CalendarGrid(
+    dates: List<String>,
+    selectedDate: String,
+    onSelectDate: (String) -> Unit
+) {
+    val daysOfWeek = listOf("M", "T", "W", "T", "F", "S", "S")
+    Row(Modifier.fillMaxWidth()) {
+        daysOfWeek.forEach { day ->
+            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
+                Text(day, style = MaterialTheme.typography.labelSmall)
+            }
+        }
+    }
+
+    val dateCells = calendarCells(dates)
+    dateCells.chunked(7).forEach { week ->
+        Row(Modifier.fillMaxWidth()) {
+            week.forEach { date ->
+                val selected = date == selectedDate
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(2.dp)
+                        .aspectRatio(1f)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(
+                            if (selected) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.surfaceVariant
+                        )
+                        .then(
+                            if (date != null) {
+                                Modifier.clickable { onSelectDate(date) }
+                            } else {
+                                Modifier
+                            }
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (date != null) {
+                        val day = date.substringAfterLast('-').toIntOrNull()?.toString().orEmpty()
+                        Text(
+                            day,
+                            color = if (selected) MaterialTheme.colorScheme.onPrimary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun calendarCells(dates: List<String>): List<String?> {
+    if (dates.isEmpty()) return emptyList()
+    val dayOfWeek = Calendar.getInstance().apply {
+        time = SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(dates.first()) ?: return emptyList()
+    }.get(Calendar.DAY_OF_WEEK)
+    val mondayFirstOffset = (dayOfWeek + 5) % 7
+    val cells = mutableListOf<String?>()
+    repeat(mondayFirstOffset) { cells.add(null) }
+    cells.addAll(dates)
+    while (cells.size % 7 != 0) cells.add(null)
+    return cells
 }
 
 @Composable
