@@ -2,7 +2,10 @@
 
 HAMS is a simple hospital appointment app for patients and doctors.
 
-![HAMS logo](app/src/main/res/drawable-nodpi/hams_logo.png)
+</br>
+<p align="center">
+<img src="app/src/main/res/drawable-nodpi/hams_logo.png" alt="HAMS Logo" width="25%">
+</p>
 
 ```mermaid
 flowchart LR
