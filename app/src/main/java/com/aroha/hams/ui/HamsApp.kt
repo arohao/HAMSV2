@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
@@ -44,10 +45,13 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.aroha.hams.R
 import com.aroha.hams.data.FirebaseHospitalRepository
 import com.aroha.hams.dataclass.Appointment
 import com.aroha.hams.dataclass.AvailabilitySlot
@@ -305,7 +309,15 @@ private fun AuthScreen(
             .padding(horizontal = 24.dp, vertical = 32.dp),
         verticalArrangement = Arrangement.Center
     ) {
-        Text("HAMS", style = MaterialTheme.typography.headlineLarge)
+        Image(
+            painter = painterResource(R.drawable.hams_logo),
+            contentDescription = "HAMS — Hospital Appointment Management System",
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(168.dp),
+            contentScale = ContentScale.Fit
+        )
+        Spacer(Modifier.height(8.dp))
         Text(
             "Hospital appointments, made simpler.",
             style = MaterialTheme.typography.bodyLarge
@@ -462,6 +474,12 @@ private fun Dashboard(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
+            Image(
+                painter = painterResource(R.mipmap.hams_launcher),
+                contentDescription = null,
+                modifier = Modifier.size(44.dp),
+                contentScale = ContentScale.Fit
+            )
             Column {
                 Text("HAMS", style = MaterialTheme.typography.headlineSmall)
                 Text("Hello, ${user.fullName}")
