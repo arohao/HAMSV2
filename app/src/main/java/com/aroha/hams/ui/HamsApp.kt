@@ -40,6 +40,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.aroha.hams.data.FirebaseHospitalRepository
 import com.aroha.hams.dataclass.Appointment
+import com.aroha.hams.dataclass.AvailabilitySlot
 import com.aroha.hams.dataclass.Role
 import com.aroha.hams.dataclass.User
 import kotlinx.coroutines.launch
@@ -57,6 +58,10 @@ fun HamsApp() {
     var doctors by remember { mutableStateOf<List<User>>(emptyList()) }
     var appointments by remember { mutableStateOf<List<Appointment>>(emptyList()) }
     var selectedDoctor by remember { mutableStateOf<User?>(null) }
+    var availableSlots by remember { mutableStateOf<List<AvailabilitySlot>>(emptyList()) }
+    var doctorSchedule by remember { mutableStateOf<List<AvailabilitySlot>>(emptyList()) }
+    var loadingSlots by remember { mutableStateOf(false) }
+    var showAvailabilityDialog by remember { mutableStateOf(false) }
     var showAppointments by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var loadingDashboard by remember { mutableStateOf(false) }
@@ -78,6 +83,8 @@ fun HamsApp() {
         try {
             if (signedInUser.role == Role.PATIENT) {
                 doctors = repository.getDoctors()
+            } else {
+                doctorSchedule = repository.getDoctorSchedule(signedInUser.id)
             }
             appointments = repository.getAppointments(signedInUser)
             error = null
@@ -85,6 +92,20 @@ fun HamsApp() {
             error = exception.message ?: "Unable to load your HAMS data."
         } finally {
             loadingDashboard = false
+        }
+    }
+
+    LaunchedEffect(selectedDoctor?.id, refreshKey) {
+        val doctor = selectedDoctor ?: return@LaunchedEffect
+        loadingSlots = true
+        try {
+            availableSlots = repository.getAvailableSlots(doctor.id)
+                .filter { it.date >= todayIsoDate() }
+            error = null
+        } catch (exception: Exception) {
+            error = exception.message ?: "Unable to load this doctor's schedule."
+        } finally {
+            loadingSlots = false
         }
     }
 
@@ -134,12 +155,29 @@ fun HamsApp() {
                     user = signedInUser,
                     doctors = doctors,
                     appointments = appointments,
+                    doctorSchedule = doctorSchedule,
                     showAppointments = showAppointments,
                     loading = loadingDashboard,
+                    busy = busy,
                     error = error,
                     onShowAppointments = { showAppointments = true },
-                    onShowDoctors = { showAppointments = false },
+                    onShowSchedule = { showAppointments = false },
                     onBookDoctor = { selectedDoctor = it },
+                    onAddAvailability = { showAvailabilityDialog = true },
+                    onRemoveAvailability = { slot ->
+                        scope.launch {
+                            busy = true
+                            error = null
+                            try {
+                                repository.removeAvailability(signedInUser, slot)
+                                refreshKey++
+                            } catch (exception: Exception) {
+                                error = exception.message ?: "Unable to remove this time."
+                            } finally {
+                                busy = false
+                            }
+                        }
+                    },
                     onSignOut = {
                         scope.launch {
                             busy = true
@@ -165,22 +203,25 @@ fun HamsApp() {
     selectedDoctor?.let { doctor ->
         BookingDialog(
             doctor = doctor,
+            slots = availableSlots,
+            loadingSlots = loadingSlots,
             busy = busy,
             error = error,
             onDismiss = { if (!busy) selectedDoctor = null },
-            onBook = { date, time ->
+            onBook = { slot ->
                 val patient = user
                 if (patient != null) {
                     scope.launch {
                         busy = true
                         error = null
                         try {
-                            repository.bookAppointment(patient, doctor, date, time)
+                            repository.bookAppointment(patient, doctor, slot)
                             selectedDoctor = null
                             showAppointments = true
                             refreshKey++
                         } catch (exception: Exception) {
                             error = exception.message ?: "Unable to book this appointment."
+                            refreshKey++
                         } finally {
                             busy = false
                         }
@@ -188,6 +229,32 @@ fun HamsApp() {
                 }
             }
         )
+    }
+
+    if (showAvailabilityDialog) {
+        val doctor = user
+        if (doctor != null && doctor.role == Role.DOCTOR) {
+            AvailabilityDialog(
+                busy = busy,
+                error = error,
+                onDismiss = { if (!busy) showAvailabilityDialog = false },
+                onAdd = { date, time ->
+                    scope.launch {
+                        busy = true
+                        error = null
+                        try {
+                            repository.addAvailability(doctor, date, time)
+                            showAvailabilityDialog = false
+                            refreshKey++
+                        } catch (exception: Exception) {
+                            error = exception.message ?: "Unable to add this time."
+                        } finally {
+                            busy = false
+                        }
+                    }
+                }
+            )
+        }
     }
 }
 
@@ -359,12 +426,16 @@ private fun Dashboard(
     user: User,
     doctors: List<User>,
     appointments: List<Appointment>,
+    doctorSchedule: List<AvailabilitySlot>,
     showAppointments: Boolean,
     loading: Boolean,
+    busy: Boolean,
     error: String?,
     onShowAppointments: () -> Unit,
-    onShowDoctors: () -> Unit,
+    onShowSchedule: () -> Unit,
     onBookDoctor: (User) -> Unit,
+    onAddAvailability: () -> Unit,
+    onRemoveAvailability: (AvailabilitySlot) -> Unit,
     onSignOut: () -> Unit
 ) {
     Column(Modifier.fillMaxSize().padding(horizontal = 20.dp, vertical = 16.dp)) {
@@ -383,7 +454,7 @@ private fun Dashboard(
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(
                     selected = !showAppointments,
-                    onClick = onShowDoctors,
+                    onClick = onShowSchedule,
                     label = { Text("Find doctors") }
                 )
                 FilterChip(
@@ -393,21 +464,28 @@ private fun Dashboard(
                 )
             }
         } else {
-            Text("Your appointments", style = MaterialTheme.typography.titleLarge)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    selected = !showAppointments,
+                    onClick = onShowSchedule,
+                    label = { Text("My schedule") }
+                )
+                FilterChip(
+                    selected = showAppointments,
+                    onClick = onShowAppointments,
+                    label = { Text("Appointments") }
+                )
+            }
         }
         error?.let { ErrorText(it) }
         if (loading) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
-        } else if (showAppointments || user.role == Role.DOCTOR) {
+        } else if (showAppointments) {
             if (appointments.isEmpty()) {
                 EmptyMessage(
-                    if (user.role == Role.DOCTOR) {
-                        "No appointments yet. New patient bookings will appear here."
-                    } else {
-                        "You don't have any appointments yet."
-                    }
+                    "No appointments yet."
                 )
             } else {
                 LazyColumn(
@@ -416,6 +494,35 @@ private fun Dashboard(
                 ) {
                     items(appointments, key = Appointment::id) { appointment ->
                         AppointmentCard(appointment, user.role)
+                    }
+                }
+            }
+        } else if (user.role == Role.DOCTOR) {
+            Column(Modifier.fillMaxSize()) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text("Open appointment times", style = MaterialTheme.typography.titleMedium)
+                    Button(onClick = onAddAvailability, enabled = !busy) {
+                        Text("Add times")
+                    }
+                }
+                if (doctorSchedule.isEmpty()) {
+                    EmptyMessage("Add open times so patients can book appointments with you.")
+                } else {
+                    LazyColumn(
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(vertical = 12.dp)
+                    ) {
+                        items(doctorSchedule, key = AvailabilitySlot::id) { slot ->
+                            AvailabilityCard(
+                                slot = slot,
+                                enabled = !busy,
+                                onRemove = { onRemoveAvailability(slot) }
+                            )
+                        }
                     }
                 }
             }
@@ -429,6 +536,32 @@ private fun Dashboard(
                 items(doctors, key = User::id) { doctor ->
                     DoctorCard(doctor, onBookDoctor)
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AvailabilityCard(
+    slot: AvailabilitySlot,
+    enabled: Boolean,
+    onRemove: () -> Unit
+) {
+    Card(Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column {
+                Text(
+                    "${formatDateLabel(slot.date)} at ${slot.time}",
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Text(if (slot.status == "OPEN") "Open for booking" else "Booked")
+            }
+            if (slot.status == "OPEN") {
+                TextButton(onClick = onRemove, enabled = enabled) { Text("Remove") }
             }
         }
     }
@@ -468,10 +601,70 @@ private fun AppointmentCard(appointment: Appointment, viewerRole: Role) {
 @Composable
 private fun BookingDialog(
     doctor: User,
+    slots: List<AvailabilitySlot>,
+    loadingSlots: Boolean,
     busy: Boolean,
     error: String?,
     onDismiss: () -> Unit,
-    onBook: (date: String, time: String) -> Unit
+    onBook: (AvailabilitySlot) -> Unit
+) {
+    var selectedSlot by remember(doctor.id) { mutableStateOf<AvailabilitySlot?>(null) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Book Dr. ${doctor.fullName}") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text("Choose an available time")
+                when {
+                    loadingSlots -> CircularProgressIndicator()
+                    slots.isEmpty() -> Text("This doctor hasn't published any open times yet.")
+                    else -> slots.groupBy(AvailabilitySlot::date).forEach { (date, daySlots) ->
+                        Text(
+                            formatDateLabel(date),
+                            style = MaterialTheme.typography.titleSmall,
+                            modifier = Modifier.padding(top = 8.dp)
+                        )
+                        daySlots.chunked(3).forEach { slotRow ->
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                slotRow.forEach { slot ->
+                                    FilterChip(
+                                        selected = selectedSlot?.id == slot.id,
+                                        onClick = { selectedSlot = slot },
+                                        label = { Text(slot.time) }
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+                error?.let { ErrorText(it) }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { selectedSlot?.let(onBook) },
+                enabled = !busy && !loadingSlots && selectedSlot != null
+            ) {
+                if (busy) {
+                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                } else {
+                    Text("Confirm booking")
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = !busy) { Text("Cancel") }
+        }
+    )
+}
+
+@Composable
+private fun AvailabilityDialog(
+    busy: Boolean,
+    error: String?,
+    onDismiss: () -> Unit,
+    onAdd: (date: String, time: String) -> Unit
 ) {
     val dates = remember { upcomingDates() }
     var selectedDate by remember { mutableStateOf(dates.first().first) }
@@ -479,10 +672,10 @@ private fun BookingDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Book Dr. ${doctor.fullName}") },
+        title = { Text("Add open times") },
         text = {
-            Column {
-                Text("Choose a date")
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Text("Date")
                 dates.chunked(3).forEach { dateRow ->
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         dateRow.forEach { (date, label) ->
@@ -494,11 +687,10 @@ private fun BookingDialog(
                         }
                     }
                 }
-                Spacer(Modifier.height(8.dp))
-                Text("Choose a time")
-                appointmentTimes.chunked(3).forEach { rowTimes ->
+                Text("Start time")
+                appointmentTimes.chunked(3).forEach { timeRow ->
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        rowTimes.forEach { time ->
+                        timeRow.forEach { time ->
                             FilterChip(
                                 selected = selectedTime == time,
                                 onClick = { selectedTime = time },
@@ -511,11 +703,11 @@ private fun BookingDialog(
             }
         },
         confirmButton = {
-            Button(onClick = { onBook(selectedDate, selectedTime) }, enabled = !busy) {
+            Button(onClick = { onAdd(selectedDate, selectedTime) }, enabled = !busy) {
                 if (busy) {
                     CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
                 } else {
-                    Text("Confirm booking")
+                    Text("Add availability")
                 }
             }
         },
@@ -550,10 +742,21 @@ private fun upcomingDates(): List<Pair<String, String>> {
     calendar.add(Calendar.DAY_OF_YEAR, 1)
     val dateFormat = SimpleDateFormat("yyyy-MM-dd", Locale.US)
     val labelFormat = SimpleDateFormat("EEE, MMM d", Locale.getDefault())
-    return List(7) {
+    return List(14) {
         val date = dateFormat.format(calendar.time)
         val label = labelFormat.format(calendar.time)
         calendar.add(Calendar.DAY_OF_YEAR, 1)
         date to label
     }
+}
+
+private fun todayIsoDate(): String =
+    SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Calendar.getInstance().time)
+
+private fun formatDateLabel(date: String): String = try {
+    val parsed = SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(date)
+        ?: return date
+    SimpleDateFormat("EEE, MMM d", Locale.getDefault()).format(parsed)
+} catch (_: Exception) {
+    date
 }

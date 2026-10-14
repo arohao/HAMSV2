@@ -1,6 +1,7 @@
 package com.aroha.hams.data
 
 import com.aroha.hams.dataclass.Appointment
+import com.aroha.hams.dataclass.AvailabilitySlot
 import com.aroha.hams.dataclass.Role
 import com.aroha.hams.dataclass.User
 import com.google.firebase.auth.FirebaseAuth
@@ -103,18 +104,94 @@ class FirebaseHospitalRepository(
             .sortedWith(compareBy(Appointment::date, Appointment::time))
     }
 
+    suspend fun getDoctorSchedule(doctorId: String): List<AvailabilitySlot> =
+        firestore().collection(AVAILABILITY)
+            .document(doctorId)
+            .collection(SLOTS)
+            .get()
+            .await()
+            .documents
+            .map { it.toAvailabilitySlot() }
+            .sortedWith(compareBy(AvailabilitySlot::date, AvailabilitySlot::time))
+
+    suspend fun getAvailableSlots(doctorId: String): List<AvailabilitySlot> =
+        firestore().collection(AVAILABILITY)
+            .document(doctorId)
+            .collection(SLOTS)
+            .whereEqualTo("status", OPEN)
+            .get()
+            .await()
+            .documents
+            .map { it.toAvailabilitySlot() }
+            .sortedWith(compareBy(AvailabilitySlot::date, AvailabilitySlot::time))
+
+    suspend fun addAvailability(doctor: User, date: String, time: String) {
+        check(doctor.role == Role.DOCTOR) { "Only doctors can add availability." }
+        val id = "$date-$time"
+        firestore().collection(AVAILABILITY)
+            .document(doctor.id)
+            .collection(SLOTS)
+            .document(id)
+            .set(
+                mapOf(
+                    "id" to id,
+                    "doctorId" to doctor.id,
+                    "date" to date,
+                    "time" to time,
+                    "status" to OPEN,
+                    "createdAt" to FieldValue.serverTimestamp()
+                )
+            )
+            .await()
+    }
+
+    suspend fun removeAvailability(doctor: User, slot: AvailabilitySlot) {
+        check(doctor.role == Role.DOCTOR && doctor.id == slot.doctorId) {
+            "Only the doctor who owns a slot can remove it."
+        }
+        val reference = firestore().collection(AVAILABILITY)
+            .document(doctor.id)
+            .collection(SLOTS)
+            .document(slot.id)
+        firestore().runTransaction { transaction ->
+            val snapshot = transaction.get(reference)
+            check(snapshot.getString("status") == OPEN) {
+                "A booked appointment cannot be removed from the schedule."
+            }
+            transaction.delete(reference)
+        }.await()
+    }
+
     suspend fun bookAppointment(
         patient: User,
         doctor: User,
-        date: String,
-        time: String
+        slot: AvailabilitySlot
     ) {
-        val appointmentId = "${doctor.id}_${date}_$time"
-        val appointment = firestore().collection(APPOINTMENTS).document(appointmentId)
+        check(patient.role == Role.PATIENT) { "Only patients can book appointments." }
+        check(doctor.role == Role.DOCTOR && slot.doctorId == doctor.id) {
+            "The selected availability does not belong to this doctor."
+        }
+        val slotReference = firestore().collection(AVAILABILITY)
+            .document(doctor.id)
+            .collection(SLOTS)
+            .document(slot.id)
+        val appointment = firestore().collection(APPOINTMENTS)
+            .document("${doctor.id}_${slot.date}_${slot.time}")
         firestore().runTransaction { transaction ->
-            check(transaction.get(appointment).exists().not()) {
-                "That appointment slot has already been booked. Please choose another time."
+            val currentSlot = transaction.get(slotReference)
+            check(currentSlot.getString("status") == OPEN) {
+                "That appointment slot is no longer available. Please choose another time."
             }
+            val bookedAt = FieldValue.serverTimestamp()
+            transaction.update(
+                slotReference,
+                mapOf(
+                    "status" to BOOKED,
+                    "patientId" to patient.id,
+                    "patientName" to patient.fullName,
+                    "bookedAt" to bookedAt
+                )
+            )
             transaction.set(
                 appointment,
                 mapOf(
@@ -123,10 +200,11 @@ class FirebaseHospitalRepository(
                     "doctorId" to doctor.id,
                     "doctorName" to doctor.fullName,
                     "specialty" to doctor.specialty,
-                    "date" to date,
-                    "time" to time,
+                    "date" to slot.date,
+                    "time" to slot.time,
                     "status" to "PENDING",
-                    "createdAt" to FieldValue.serverTimestamp()
+                    "availabilityId" to slot.id,
+                    "createdAt" to bookedAt
                 )
             )
         }.await()
@@ -214,8 +292,20 @@ class FirebaseHospitalRepository(
         status = getString("status").orEmpty()
     )
 
+    private fun DocumentSnapshot.toAvailabilitySlot(): AvailabilitySlot = AvailabilitySlot(
+        id = getString("id") ?: id,
+        doctorId = getString("doctorId").orEmpty(),
+        date = getString("date").orEmpty(),
+        time = getString("time").orEmpty(),
+        status = getString("status").orEmpty()
+    )
+
     private companion object {
         const val USERS = "users"
         const val APPOINTMENTS = "appointments"
+        const val AVAILABILITY = "availability"
+        const val SLOTS = "slots"
+        const val OPEN = "OPEN"
+        const val BOOKED = "BOOKED"
     }
 }
