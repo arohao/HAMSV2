@@ -1,0 +1,57 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function ownsUser(userId) {
+      return signedIn() && request.auth.uid == userId;
+    }
+
+    match /users/{userId} {
+      allow create: if ownsUser(userId)
+        && request.resource.data.id == userId
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.role in ['PATIENT', 'DOCTOR']
+        && request.resource.data.keys().hasOnly([
+          'id', 'firstName', 'lastName', 'email', 'role', 'specialty',
+          'address', 'phoneNumber', 'createdAt'
+        ]);
+      allow get: if signedIn()
+        && (resource.data.role == 'DOCTOR' || resource.id == request.auth.uid);
+      allow list: if signedIn() && resource.data.role == 'DOCTOR';
+      allow update, delete: if false;
+    }
+
+    match /appointments/{appointmentId} {
+      allow get: if signedIn()
+        && (
+          !exists(/databases/$(database)/documents/appointments/$(appointmentId))
+          || resource.data.patientId == request.auth.uid
+          || resource.data.doctorId == request.auth.uid
+        );
+      allow list: if signedIn() && resource.data.patientId == request.auth.uid;
+      allow list: if signedIn() && resource.data.doctorId == request.auth.uid;
+      allow create: if signedIn()
+        && request.resource.data.patientId == request.auth.uid
+        && request.resource.data.status == 'PENDING'
+        && request.resource.data.keys().hasOnly([
+          'patientId', 'patientName', 'doctorId', 'doctorName', 'specialty',
+          'date', 'time', 'status', 'createdAt'
+        ])
+        && request.resource.data.keys().hasAll([
+          'patientId', 'patientName', 'doctorId', 'doctorName', 'specialty',
+          'date', 'time', 'status', 'createdAt'
+        ])
+        && get(/databases/$(database)/documents/users/$(request.auth.uid))
+          .data.role == 'PATIENT'
+        && get(/databases/$(database)/documents/users/$(request.resource.data.doctorId))
+          .data.role == 'DOCTOR'
+        && appointmentId == request.resource.data.doctorId
+          + '_' + request.resource.data.date + '_' + request.resource.data.time;
+      allow update, delete: if false;
+    }
+  }
+}
