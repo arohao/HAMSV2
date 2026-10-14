@@ -17,6 +17,11 @@ class FirebaseHospitalRepository(
 ) {
     suspend fun currentUser(): User? {
         val firebaseUser = auth.currentUser ?: return null
+        firebaseUser.reload().await()
+        if (!firebaseUser.isEmailVerified) {
+            sendVerificationAndSignOut(firebaseUser)
+            error("Verify your email address before signing in. A new verification email has been sent.")
+        }
         return readUserOrPatient(firebaseUser)
     }
 
@@ -26,6 +31,11 @@ class FirebaseHospitalRepository(
             .await()
         val firebaseUser = credential.user
             ?: error("Firebase did not return a user after sign-in.")
+        firebaseUser.reload().await()
+        if (!firebaseUser.isEmailVerified) {
+            sendVerificationAndSignOut(firebaseUser)
+            error("Verify your email address before signing in. A new verification email has been sent.")
+        }
         return readUserOrPatient(firebaseUser)
     }
 
@@ -40,8 +50,9 @@ class FirebaseHospitalRepository(
         val credential = auth
             .createUserWithEmailAndPassword(email.trim(), password)
             .await()
-        val uid = credential.user?.uid
+        val firebaseUser = credential.user
             ?: error("Firebase did not return a user after registration.")
+        val uid = firebaseUser.uid
         val user = User(
             id = uid,
             firstName = firstName.trim(),
@@ -63,6 +74,11 @@ class FirebaseHospitalRepository(
                 )
             }
             throw profileException
+        }
+        try {
+            firebaseUser.sendEmailVerification().await()
+        } finally {
+            auth.signOut()
         }
         return user
     }
@@ -118,6 +134,14 @@ class FirebaseHospitalRepository(
 
     suspend fun signOut() {
         auth.signOut()
+    }
+
+    private suspend fun sendVerificationAndSignOut(firebaseUser: FirebaseUser) {
+        try {
+            firebaseUser.sendEmailVerification().await()
+        } finally {
+            auth.signOut()
+        }
     }
 
     private suspend fun readUserOrPatient(firebaseUser: FirebaseUser): User {
