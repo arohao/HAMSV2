@@ -23,6 +23,8 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -54,7 +56,9 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
 
-private val appointmentTimes = listOf("09:00", "10:00", "11:00", "14:00", "15:00")
+private val appointmentTimes = (9 * 60..17 * 60 step 30).map { minutes ->
+    "%02d:%02d".format(Locale.US, minutes / 60, minutes % 60)
+}
 
 @Composable
 fun HamsApp() {
@@ -625,24 +629,16 @@ private fun BookingDialog(
                 when {
                     loadingSlots -> CircularProgressIndicator()
                     slots.isEmpty() -> Text("This doctor hasn't published any open times yet.")
-                    else -> slots.groupBy(AvailabilitySlot::date).forEach { (date, daySlots) ->
-                        Text(
-                            formatDateLabel(date),
-                            style = MaterialTheme.typography.titleSmall,
-                            modifier = Modifier.padding(top = 8.dp)
-                        )
-                        daySlots.chunked(3).forEach { slotRow ->
-                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                slotRow.forEach { slot ->
-                                    FilterChip(
-                                        selected = selectedSlot?.id == slot.id,
-                                        onClick = { selectedSlot = slot },
-                                        label = { Text(slot.time) }
-                                    )
-                                }
-                            }
+                    else -> TimeDropdown(
+                        label = "Available appointment",
+                        selectedValue = selectedSlot?.id,
+                        options = slots.map { slot ->
+                            slot.id to "${formatDateLabel(slot.date)} · ${formatTimeLabel(slot.time)}"
+                        },
+                        onSelect = { selectedId ->
+                            selectedSlot = slots.firstOrNull { it.id == selectedId }
                         }
-                    }
+                    )
                 }
                 error?.let { ErrorText(it) }
             }
@@ -697,24 +693,12 @@ private fun AvailabilityDialog(
                     onSelectDate = { selectedDate = it }
                 )
                 Spacer(Modifier.height(16.dp))
-                Text("Available start times", style = MaterialTheme.typography.titleSmall)
-                Spacer(Modifier.height(4.dp))
-                appointmentTimes.chunked(3).forEach { timeRow ->
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        timeRow.forEach { time ->
-                            Box(Modifier.weight(1f), contentAlignment = Alignment.Center) {
-                                FilterChip(
-                                    selected = selectedTime == time,
-                                    onClick = { selectedTime = time },
-                                    label = { Text(time) }
-                                )
-                            }
-                        }
-                    }
-                }
+                TimeDropdown(
+                    label = "Available start time",
+                    selectedValue = selectedTime,
+                    options = appointmentTimes.map { it to formatTimeLabel(it) },
+                    onSelect = { selectedTime = it }
+                )
                 error?.let { ErrorText(it) }
             }
         },
@@ -801,6 +785,41 @@ private fun calendarCells(dates: List<String>): List<String?> {
 }
 
 @Composable
+private fun TimeDropdown(
+    label: String,
+    selectedValue: String?,
+    options: List<Pair<String, String>>,
+    onSelect: (String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selectedLabel = options.firstOrNull { it.first == selectedValue }?.second
+
+    Box(Modifier.fillMaxWidth()) {
+        OutlinedButton(
+            onClick = { expanded = true },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("$label: ${selectedLabel ?: "Choose"}")
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.heightIn(max = 320.dp)
+        ) {
+            options.forEach { (value, optionLabel) ->
+                DropdownMenuItem(
+                    text = { Text(optionLabel) },
+                    onClick = {
+                        onSelect(value)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun EmptyMessage(message: String) {
     Box(
         Modifier.fillMaxSize().padding(24.dp),
@@ -842,4 +861,12 @@ private fun formatDateLabel(date: String): String = try {
     SimpleDateFormat("EEE, MMM d", Locale.getDefault()).format(parsed)
 } catch (_: Exception) {
     date
+}
+
+private fun formatTimeLabel(time: String): String = try {
+    val parsed = SimpleDateFormat("HH:mm", Locale.US).parse(time)
+        ?: return time
+    SimpleDateFormat("h:mm a", Locale.getDefault()).format(parsed)
+} catch (_: Exception) {
+    time
 }
