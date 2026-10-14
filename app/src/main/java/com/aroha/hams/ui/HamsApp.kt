@@ -317,7 +317,7 @@ private fun AuthScreen(
                 .height(168.dp),
             contentScale = ContentScale.Fit
         )
-        Spacer(Modifier.height(8.dp))
+        Spacer(Modifier.height(40.dp))
         Text(
             "Hospital appointments, made simpler.",
             style = MaterialTheme.typography.bodyLarge
